@@ -1,4 +1,4 @@
-use crate::lyrics::LyricSet;
+use crate::lyrics::{active_line_index, LyricSet};
 use crate::player::Track;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
@@ -15,7 +15,14 @@ pub struct ScreenState {
     pub scroll: usize,
 }
 
-pub fn draw(stdout: &mut Stdout, state: &mut ScreenState, track: Option<&Track>, position: f64, offset_ms: i64) -> io::Result<()> {
+pub fn draw(
+    stdout: &mut Stdout,
+    state: &mut ScreenState,
+    track: Option<&Track>,
+    position: f64,
+    offset_ms: i64,
+    minimal_ui: bool,
+) -> io::Result<()> {
     let (columns, rows) = terminal::size()?;
     let width = columns as usize;
     let height = rows as usize;
@@ -23,19 +30,23 @@ pub fn draw(stdout: &mut Stdout, state: &mut ScreenState, track: Option<&Track>,
     if width == 0 || height == 0 {
         return stdout.flush();
     }
+
+    let chrome_rows = if minimal_ui { 0 } else { 4 };
     if let Some(lyrics) = state.lyrics.as_ref().filter(|lyrics| !lyrics.synced) {
         let wrapped_count: usize = lyrics.lines.iter().map(|line| wrap(&line.text, width).len()).sum();
-        let visible = height.saturating_sub(4).max(1);
+        let visible = height.saturating_sub(chrome_rows).max(1);
         state.scroll = state.scroll.min(wrapped_count.saturating_sub(visible));
     }
 
-    put_at(stdout, 0, 0, "lyrix-rs by d1ezz9", Color::Cyan)?;
-    let controls = "q quit · r retry";
-    put_at(stdout, width.saturating_sub(UnicodeWidthStr::width(controls)), 0, controls, Color::DarkGrey)?;
-    if let Some(track) = track {
-        let heading = format!("{} — {}", track.artist, track.title);
-        let heading = wrap(&heading, width).into_iter().next().unwrap_or_default();
-        put_centered(stdout, 1.min(height - 1), &heading, width, Color::DarkGrey)?;
+    if !minimal_ui {
+        put_at(stdout, 0, 0, "lyrix-rs by d1ezz9", Color::Cyan)?;
+        let controls = "q quit · r retry";
+        put_at(stdout, width.saturating_sub(UnicodeWidthStr::width(controls)), 0, controls, Color::DarkGrey)?;
+        if let Some(track) = track {
+            let heading = format!("{} — {}", track.artist, track.title);
+            let heading = wrap(&heading, width).into_iter().next().unwrap_or_default();
+            put_centered(stdout, 1.min(height - 1), &heading, width, Color::DarkGrey)?;
+        }
     }
 
     match (&state.lyrics, track) {
@@ -46,20 +57,31 @@ pub fn draw(stdout: &mut Stdout, state: &mut ScreenState, track: Option<&Track>,
             let message = wrap(message, width).into_iter().next().unwrap_or_default();
             put_centered(stdout, height / 2, &message, width, Color::DarkGrey)?;
         }
-        (Some(lyrics), Some(_)) if lyrics.synced => draw_synced(stdout, lyrics, position, offset_ms, width, height)?,
-        (Some(lyrics), Some(_)) => draw_plain(stdout, lyrics, state.scroll, width, height)?,
+        (Some(lyrics), Some(_)) if lyrics.synced => {
+            draw_synced(stdout, lyrics, position, offset_ms, width, height, minimal_ui)?;
+        }
+        (Some(lyrics), Some(_)) => {
+            draw_plain(stdout, lyrics, state.scroll, width, height, minimal_ui)?;
+        }
     }
 
-    if height > 2 {
-        put_centered(stdout, height - 1, "↑/↓ or j/k scroll · q quit", width, Color::DarkGrey)?;
+    let is_plain_lyrics = state.lyrics.as_ref().is_some_and(|lyrics| !lyrics.synced);
+    if !minimal_ui && is_plain_lyrics && height > 2 {
+        put_centered(stdout, height - 1, "↑/↓ or j/k scroll", width, Color::DarkGrey)?;
     }
     stdout.flush()
 }
 
-fn draw_synced(stdout: &mut Stdout, lyrics: &LyricSet, position: f64, offset_ms: i64, width: usize, height: usize) -> io::Result<()> {
-    let effective_position = position + offset_ms as f64 / 1000.0;
-    let count = lyrics.lines.partition_point(|line| line.time.unwrap_or(f64::INFINITY) <= effective_position);
-    let current = count.checked_sub(1);
+fn draw_synced(
+    stdout: &mut Stdout,
+    lyrics: &LyricSet,
+    position: f64,
+    offset_ms: i64,
+    width: usize,
+    height: usize,
+    minimal_ui: bool,
+) -> io::Result<()> {
+    let current = active_line_index(lyrics, position, offset_ms);
     let mut display: Vec<(String, Color)> = Vec::new();
     if let Some(index) = current {
         if index > 0 {
@@ -78,7 +100,8 @@ fn draw_synced(stdout: &mut Stdout, lyrics: &LyricSet, position: f64, offset_ms:
         display.push(("…".to_owned(), Color::DarkGrey));
     }
 
-    let available = height.saturating_sub(4).max(1);
+    let chrome_rows = if minimal_ui { 0 } else { 4 };
+    let available = height.saturating_sub(chrome_rows).max(1);
     if display.len() > available {
         // Preserve the current lyric while clipping unusually long wrapped lines.
         let current_start = display.iter().position(|(_, color)| *color == Color::White).unwrap_or(0);
@@ -94,14 +117,26 @@ fn draw_synced(stdout: &mut Stdout, lyrics: &LyricSet, position: f64, offset_ms:
     Ok(())
 }
 
-fn draw_plain(stdout: &mut Stdout, lyrics: &LyricSet, scroll: usize, width: usize, height: usize) -> io::Result<()> {
+fn draw_plain(
+    stdout: &mut Stdout,
+    lyrics: &LyricSet,
+    scroll: usize,
+    width: usize,
+    height: usize,
+    minimal_ui: bool,
+) -> io::Result<()> {
     let wrapped: Vec<String> = lyrics.lines.iter().flat_map(|line| wrap(&line.text, width)).collect();
-    let visible = height.saturating_sub(4).max(1);
+    let chrome_rows = if minimal_ui { 0 } else { 4 };
+    let visible = height.saturating_sub(chrome_rows).max(1);
     let max_scroll = wrapped.len().saturating_sub(visible);
     let start = scroll.min(max_scroll);
     let end = (start + visible).min(wrapped.len());
     let displayed = &wrapped[start..end];
-    let first_y = 2 + visible.saturating_sub(displayed.len()) / 2;
+    let first_y = if minimal_ui {
+        height.saturating_sub(displayed.len()) / 2
+    } else {
+        2 + visible.saturating_sub(displayed.len()) / 2
+    };
     for (offset, text) in displayed.iter().enumerate() {
         put_centered(stdout, first_y + offset, text, width, Color::White)?;
     }

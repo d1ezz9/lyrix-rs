@@ -29,7 +29,7 @@ pub fn draw(stdout: &mut Stdout, state: &mut ScreenState, track: Option<&Track>,
         state.scroll = state.scroll.min(wrapped_count.saturating_sub(visible));
     }
 
-    put_at(stdout, 0, 0, "LYRIX", Color::Cyan)?;
+    put_at(stdout, 0, 0, "lyrix-rs by d1ezz9", Color::Cyan)?;
     let controls = "q quit · r retry";
     put_at(stdout, width.saturating_sub(UnicodeWidthStr::width(controls)), 0, controls, Color::DarkGrey)?;
     if let Some(track) = track {

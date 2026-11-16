@@ -19,6 +19,15 @@ pub struct LyricSet {
     pub synced: bool,
 }
 
+/// Return the active synchronized line. Negative offsets make lines appear earlier.
+pub fn active_line_index(lyrics: &LyricSet, position: f64, offset_ms: i64) -> Option<usize> {
+    let effective_position = position - offset_ms as f64 / 1000.0;
+    let count = lyrics.lines.partition_point(|line| {
+        line.time.unwrap_or(f64::INFINITY) <= effective_position
+    });
+    count.checked_sub(1)
+}
+
 #[derive(Debug)]
 pub struct LyricsRequest {
     pub track: Track,
@@ -222,5 +231,13 @@ mod tests {
         let lyrics = parse_lrc("[ar:An Artist]\n[ti:A Song]\nFirst line\nSecond line").unwrap();
         assert!(!lyrics.synced);
         assert_eq!(lyrics.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), vec!["First line", "Second line"]);
+    }
+
+    #[test]
+    fn negative_offset_activates_a_line_earlier() {
+        let lyrics = parse_lrc("[00:10.00]line").unwrap();
+        assert_eq!(active_line_index(&lyrics, 9.7, 0), None);
+        assert_eq!(active_line_index(&lyrics, 9.7, -300), Some(0));
+        assert_eq!(active_line_index(&lyrics, 10.3, 300), Some(0));
     }
 }

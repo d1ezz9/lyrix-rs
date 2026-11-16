@@ -1,4 +1,4 @@
-use crate::lyrics::{self, LyricsRequest, LyricsResult, LyricSet};
+use crate::lyrics::{self, active_line_index, LyricsRequest, LyricsResult};
 use crate::player::{self, Track};
 use crate::ui::{self, ScreenState};
 use anyhow::Result;
@@ -30,7 +30,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run(player_name: Option<String>, offset_ms: i64, poll_interval: Duration) -> Result<()> {
+pub fn run(player_name: Option<String>, offset_ms: i64, minimal_ui: bool, poll_interval: Duration) -> Result<()> {
     let _terminal = TerminalGuard::enter()?;
     let mut stdout = io::stdout();
     let (request_tx, result_rx) = lyrics::start_worker();
@@ -87,7 +87,7 @@ pub fn run(player_name: Option<String>, offset_ms: i64, poll_interval: Duration)
             last_position_check = Instant::now();
             position = player::position(player_name.as_deref());
             if let Some(lyrics) = state.lyrics.as_ref().filter(|lyrics| lyrics.synced) {
-                let index = current_lyric_index(lyrics, position + offset_ms as f64 / 1000.0);
+                let index = active_line_index(lyrics, position, offset_ms);
                 if index != last_drawn_index {
                     last_drawn_index = index;
                     dirty = true;
@@ -96,16 +96,11 @@ pub fn run(player_name: Option<String>, offset_ms: i64, poll_interval: Duration)
         }
 
         if dirty {
-            ui::draw(&mut stdout, &mut state, current_track.as_ref(), position, offset_ms)?;
+            ui::draw(&mut stdout, &mut state, current_track.as_ref(), position, offset_ms, minimal_ui)?;
             dirty = false;
         }
     }
     Ok(())
-}
-
-fn current_lyric_index(lyrics: &LyricSet, position: f64) -> Option<usize> {
-    let count = lyrics.lines.partition_point(|line| line.time.unwrap_or(f64::INFINITY) <= position);
-    count.checked_sub(1)
 }
 
 fn should_quit(key: KeyEvent) -> bool {

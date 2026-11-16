@@ -17,8 +17,12 @@ struct Args {
     player: Option<String>,
 
     /// Adjust synchronized lyrics in milliseconds (negative values show lines earlier)
-    #[arg(long, default_value_t = -300)]
+    #[arg(long, default_value_t = 0)]
     offset_ms: i64,
+
+    /// Hide track title and controls; show lyrics only
+    #[arg(long)]
+    minimal_ui: bool,
 
     /// Media polling interval in milliseconds (100–2000)
     #[arg(long, default_value_t = 250, value_parser = clap::value_parser!(u64).range(100..=2000))]
@@ -35,5 +39,5 @@ fn main() -> Result<()> {
         .output()
         .context("playerctl is required but was not found; install it with your system package manager")?;
 
-    app::run(args.player, args.offset_ms, Duration::from_millis(args.interval_ms))
+    app::run(args.player, args.offset_ms, args.minimal_ui, Duration::from_millis(args.interval_ms))
 }
